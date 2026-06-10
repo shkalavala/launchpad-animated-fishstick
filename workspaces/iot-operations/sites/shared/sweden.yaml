@@ -1,0 +1,27 @@
+# Sweden Regional Template (Subscription-Level)
+#
+# Inheritance: base-site.yaml → sweden.yaml → <factory>-<env>.yaml
+#
+# This template represents the Sweden subscription - shared by all Swedish
+# factories (Stockholm, Gothenburg). Sites inheriting from this get
+# subscription + location + country pre-configured.
+#
+# Hierarchy:
+#   sweden.yaml (subscription-level)
+#     ├── stockholm-dev.yaml            (RG-level)
+#     ├── stockholm-assembly-prod.yaml  (RG-level)
+#     ├── stockholm-bar-prod.yaml       (RG-level)
+#     ├── gothenburg-dev.yaml           (RG-level)
+#     └── gothenburg-cutting-prod.yaml  (RG-level)
+
+apiVersion: siteops/v1
+kind: SiteTemplate
+name: sweden
+inherits: ../base-site.yaml
+
+subscription: "00000000-0000-0000-0000-000000000000"
+location: swedencentral
+
+labels:
+  country: SE
+  region: europe

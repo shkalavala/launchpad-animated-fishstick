@@ -1,0 +1,25 @@
+# Gothenburg Shared Dev Site
+#
+# One shared dev AIO instance for the Gothenburg site.
+
+apiVersion: siteops/v1
+kind: Site
+name: gothenburg-dev
+inherits: shared/sweden.yaml
+
+# subscription, location, country inherited from shared/sweden.yaml
+resourceGroup: rg-iot-gothenburg-dev
+
+labels:
+  environment: dev
+  city: Gothenburg
+
+parameters:
+  clusterName: gothenburg-dev-arc
+  brokerConfig:
+    frontendReplicas: 1
+    frontendWorkers: 1
+    backendRedundancyFactor: 2
+    backendWorkers: 1
+    backendPartitions: 1
+    memoryProfile: Low
