@@ -1,0 +1,25 @@
+# Stockholm Shared Dev Site
+#
+# One shared dev AIO instance for the Stockholm site (all plants share it).
+
+apiVersion: siteops/v1
+kind: Site
+name: stockholm-dev
+inherits: shared/sweden.yaml
+
+# subscription, location, country inherited from shared/sweden.yaml
+resourceGroup: rg-iot-stockholm-dev
+
+labels:
+  environment: dev
+  city: Stockholm
+
+parameters:
+  clusterName: stockholm-dev-arc
+  brokerConfig:
+    frontendReplicas: 1
+    frontendWorkers: 1
+    backendRedundancyFactor: 2
+    backendWorkers: 1
+    backendPartitions: 1
+    memoryProfile: Low

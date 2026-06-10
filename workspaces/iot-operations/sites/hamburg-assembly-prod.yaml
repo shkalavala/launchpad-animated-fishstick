@@ -1,23 +1,25 @@
-# Munich Production Site
+# Hamburg Assembly Line - Production Site
+#
+# Production AIO instance for the Hamburg assembly line factory.
 
 apiVersion: siteops/v1
 kind: Site
-name: munich-prod
+name: hamburg-assembly-prod
 inherits: shared/germany.yaml
 
 # subscription, location, country inherited from shared/germany.yaml
-resourceGroup: rg-iot-munich-prod
+resourceGroup: rg-iot-hamburg-assembly-prod
 
 labels:
   environment: prod
-  city: Munich
+  city: Hamburg
 
 parameters:
-  clusterName: munich-prod-arc
+  clusterName: hamburg-assembly-prod-arc
   brokerConfig:
     frontendReplicas: 4
     frontendWorkers: 2
     backendRedundancyFactor: 2
     backendWorkers: 4
     backendPartitions: 2
-    memoryProfile: Medium
+    memoryProfile: High

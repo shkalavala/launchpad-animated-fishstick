@@ -1,19 +1,21 @@
-# Munich Development Site
+# Hamburg Shared Dev Site
+#
+# One shared dev AIO instance for the Hamburg site.
 
 apiVersion: siteops/v1
 kind: Site
-name: munich-dev
+name: hamburg-dev
 inherits: shared/germany.yaml
 
 # subscription, location, country inherited from shared/germany.yaml
-resourceGroup: rg-iot-munich-dev
+resourceGroup: rg-iot-hamburg-dev
 
 labels:
   environment: dev
-  city: Munich
+  city: Hamburg
 
 parameters:
-  clusterName: munich-dev-arc
+  clusterName: hamburg-dev-arc
   brokerConfig:
     frontendReplicas: 1
     frontendWorkers: 1

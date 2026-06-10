@@ -1,0 +1,25 @@
+# Gothenburg Cutting Equipment - Production Site
+#
+# Production AIO instance for the Gothenburg cutting-equipment factory.
+
+apiVersion: siteops/v1
+kind: Site
+name: gothenburg-cutting-prod
+inherits: shared/sweden.yaml
+
+# subscription, location, country inherited from shared/sweden.yaml
+resourceGroup: rg-iot-gothenburg-cutting-prod
+
+labels:
+  environment: prod
+  city: Gothenburg
+
+parameters:
+  clusterName: gothenburg-cutting-prod-arc
+  brokerConfig:
+    frontendReplicas: 4
+    frontendWorkers: 2
+    backendRedundancyFactor: 2
+    backendWorkers: 4
+    backendPartitions: 2
+    memoryProfile: High

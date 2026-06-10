@@ -1,0 +1,25 @@
+# Stockholm Assembly Line - Production Site
+#
+# Production AIO instance for the Stockholm assembly line factory.
+
+apiVersion: siteops/v1
+kind: Site
+name: stockholm-assembly-prod
+inherits: shared/sweden.yaml
+
+# subscription, location, country inherited from shared/sweden.yaml
+resourceGroup: rg-iot-stockholm-assembly-prod
+
+labels:
+  environment: prod
+  city: Stockholm
+
+parameters:
+  clusterName: stockholm-assembly-prod-arc
+  brokerConfig:
+    frontendReplicas: 4
+    frontendWorkers: 2
+    backendRedundancyFactor: 2
+    backendWorkers: 4
+    backendPartitions: 2
+    memoryProfile: High
