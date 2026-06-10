@@ -1,0 +1,145 @@
+# Deploy pipeline: Manual deployment trigger
+# Equivalent to .github/workflows/deploy.yaml
+
+name: $(Date:yyyyMMdd)$(Rev:.r) · ${{ parameters.environment }} · ${{ parameters.manifest }}${{ iif(parameters.dryRun, ' (dry-run)', '') }}
+
+trigger: none
+pr: none
+
+parameters:
+  - name: workspace
+    displayName: Workspace
+    type: string
+    default: iot-operations
+    values: [iot-operations]
+
+  - name: manifest
+    displayName: Manifest (path relative to the workspace root)
+    type: string
+    default: manifests/aio-install.yaml
+    values:
+      - manifests/aio-install.yaml
+      - manifests/aio-upgrade.yaml
+      - manifests/secretsync.yaml
+      - samples/secretsync-sample/manifest.yaml
+      - samples/opc-ua-solution/manifest.yaml
+      - samples/aio-with-opc-ua/manifest.yaml
+
+  - name: environment
+    displayName: Target environment
+    type: string
+    default: dev
+    values: [dev, staging, prod]
+
+  - name: selector
+    displayName: Additional site selector (e.g., country=US,name=seattle-dev)
+    type: string
+    default: ' '
+
+  - name: dryRun
+    displayName: Dry run (preview only)
+    type: boolean
+    default: false
+
+  - name: siteopsSource
+    displayName: siteops install source (e.g. git+https://github.com/.../digital-ops-scale-kit@<tag>). Empty = local editable install.
+    type: string
+    default: ' '
+
+  # Per-environment lookup tables. To split resources per environment,
+  # change the values below. No structural changes needed.
+  - name: serviceConnections
+    displayName: Service connection per environment
+    type: object
+    default:
+      dev: azure-siteops
+      staging: azure-siteops
+      prod: azure-siteops
+
+  - name: secretGroups
+    displayName: Variable group per environment
+    type: object
+    default:
+      dev: siteops-secrets
+      staging: siteops-secrets
+      prod: siteops-secrets
+
+variables:
+  - group: ${{ parameters.secretGroups[parameters.environment] }}
+  - name: PYTHONUNBUFFERED
+    value: '1'
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: prepare
+    displayName: Validate and Resolve
+    jobs:
+      - job: resolve
+        displayName: Prepare Deployment
+        steps:
+          - checkout: self
+            fetchDepth: 1
+            persistCredentials: false
+
+          - template: templates/setup-siteops.yaml
+
+          - script: |
+              MANIFEST_PATH="workspaces/${{ parameters.workspace }}/${{ parameters.manifest }}"
+              if [[ ! -f "$MANIFEST_PATH" ]]; then
+                echo "##vso[task.logissue type=error]Manifest not found: $MANIFEST_PATH"
+                echo ""
+                echo "Available manifests:"
+                { find "workspaces/${{ parameters.workspace }}/manifests" -maxdepth 1 \
+                    \( -name "*.yaml" -o -name "*.yml" \) -not -name "_*" 2>/dev/null
+                  find "workspaces/${{ parameters.workspace }}/samples" -mindepth 2 -maxdepth 2 \
+                    \( -name "manifest.yaml" -o -name "manifest.yml" \) 2>/dev/null
+                } || echo "  (none found)"
+                exit 1
+              fi
+              echo "✓ Manifest found: $MANIFEST_PATH"
+            displayName: Validate manifest exists
+
+          - script: |
+              SELECTOR="$(echo "$INPUT_SELECTOR" | xargs)"
+              if [ -n "$SELECTOR" ]; then
+                COMBINED="environment=$ENV,$SELECTOR"
+              else
+                COMBINED="environment=$ENV"
+              fi
+
+              SUMMARY_FILE="$(Build.ArtifactStagingDirectory)/deploy-config.md"
+              echo "### Deployment Configuration" > "$SUMMARY_FILE"
+              echo "| Setting | Value |" >> "$SUMMARY_FILE"
+              echo "|---------|-------|" >> "$SUMMARY_FILE"
+              echo "| Workspace | \`$WORKSPACE_DIR\` |" >> "$SUMMARY_FILE"
+              echo "| Manifest | \`$MANIFEST_REL\` |" >> "$SUMMARY_FILE"
+              echo "| Environment | \`$ENV\` |" >> "$SUMMARY_FILE"
+              echo "| Selector | \`$COMBINED\` |" >> "$SUMMARY_FILE"
+              echo "| Dry Run | \`$DRY_RUN\` |" >> "$SUMMARY_FILE"
+              echo "##vso[task.uploadsummary]$SUMMARY_FILE"
+            displayName: Write deployment summary
+            # Free-form params (selector) are routed through env vars rather
+            # than interpolated into the script body so a parameter containing
+            # shell metachars cannot break out of the command.
+            env:
+              ENV: ${{ parameters.environment }}
+              INPUT_SELECTOR: ${{ parameters.selector }}
+              WORKSPACE_DIR: workspaces/${{ parameters.workspace }}
+              MANIFEST_REL: ${{ parameters.manifest }}
+              DRY_RUN: ${{ parameters.dryRun }}
+
+  - template: templates/siteops-deploy.yaml
+    parameters:
+      serviceConnection: ${{ parameters.serviceConnections[parameters.environment] }}
+      workspace: workspaces/${{ parameters.workspace }}
+      manifest: ${{ parameters.manifest }}
+      environment: ${{ parameters.environment }}
+      ${{ if not(in(parameters.selector, '', ' ')) }}:
+        selector: environment=${{ parameters.environment }},${{ parameters.selector }}
+      ${{ else }}:
+        selector: environment=${{ parameters.environment }}
+      dryRun: ${{ parameters.dryRun }}
+      ${{ if not(in(parameters.siteopsSource, '', ' ')) }}:
+        siteopsSource: ${{ parameters.siteopsSource }}

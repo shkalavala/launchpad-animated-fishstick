@@ -1,0 +1,120 @@
+# CI pipeline: Unit tests and manifest validation
+# Equivalent to .github/workflows/ci.yaml
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - siteops/**
+      - workspaces/**
+      - tests/**
+      - scripts/**
+      - pyproject.toml
+
+pr:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - siteops/**
+      - workspaces/**
+      - tests/**
+      - scripts/**
+      - pyproject.toml
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+  - job: test
+    displayName: Unit Tests
+    steps:
+      - checkout: self
+        fetchDepth: 1
+        persistCredentials: false
+
+      - template: templates/setup-siteops.yaml
+        parameters:
+          installDev: true
+
+      - script: >
+          pytest tests/ -v
+          --cov=siteops
+          --cov-report=term-missing
+          --cov-report=xml:coverage.xml
+          --junitxml=test-results.xml
+        displayName: Run unit tests
+
+      - task: PublishTestResults@2
+        displayName: Publish test results
+        condition: succeededOrFailed()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: test-results.xml
+          testRunTitle: Site Ops Unit Tests
+
+      - task: PublishCodeCoverageResults@2
+        displayName: Publish code coverage
+        condition: succeededOrFailed()
+        inputs:
+          summaryFileLocation: coverage.xml
+
+  - job: validate
+    displayName: Validate Manifests
+    steps:
+      - checkout: self
+        fetchDepth: 1
+        persistCredentials: false
+
+      - template: templates/setup-siteops.yaml
+
+      - pwsh: ./scripts/validate-bicep.ps1
+        displayName: Validate Bicep templates
+
+      - script: |
+          # set -o pipefail so `siteops ... | tee` returns siteops's exit
+          # code, not tee's. ADO `script:` does not set pipefail by default.
+          set -o pipefail
+          WORKSPACE_DIR="workspaces/iot-operations"
+          # Discover standalone Manifest YAML across the standard top-level dirs.
+          # Excludes partials (filename prefixed `_`) and non-manifest YAML
+          # under samples/ (inputs.yaml, outputs.yaml, etc.).
+          MANIFESTS=$(
+            { find "$WORKSPACE_DIR/manifests" -maxdepth 1 \
+                \( -name "*.yaml" -o -name "*.yml" \) -not -name "_*" 2>/dev/null
+              find "$WORKSPACE_DIR/samples" -mindepth 2 -maxdepth 2 \
+                \( -name "manifest.yaml" -o -name "manifest.yml" \) 2>/dev/null
+            } | tr '\n' ' '
+          )
+
+          if [[ -z "$MANIFESTS" ]]; then
+            echo "##vso[task.logissue type=warning]No standalone manifests found in $WORKSPACE_DIR"
+            exit 0
+          fi
+
+          echo "Found manifests: $MANIFESTS"
+
+          SUMMARY_FILE="$(Build.ArtifactStagingDirectory)/validation-summary.md"
+          echo "## Deployment Plans" > "$SUMMARY_FILE"
+          EXIT_CODE=0
+
+          for manifest in $MANIFESTS; do
+            manifest_rel="${manifest#$WORKSPACE_DIR/}"
+            echo "##[group]Validating $manifest"
+            echo "### $(basename $manifest)" >> "$SUMMARY_FILE"
+            echo '```' >> "$SUMMARY_FILE"
+
+            if siteops -w "$WORKSPACE_DIR" validate "$manifest_rel" -v 2>&1 | tee -a "$SUMMARY_FILE"; then
+              echo "✓ Valid"
+            else
+              EXIT_CODE=1
+            fi
+
+            echo '```' >> "$SUMMARY_FILE"
+            echo "##[endgroup]"
+          done
+
+          echo "##vso[task.uploadsummary]$SUMMARY_FILE"
+          exit $EXIT_CODE
+        displayName: Validate manifests and show plans

@@ -1,0 +1,23 @@
+# Seattle Development Site
+
+apiVersion: siteops/v1
+kind: Site
+name: seattle-dev
+inherits: shared/usa-west.yaml
+
+# subscription, location, country inherited from shared/usa-west.yaml
+resourceGroup: rg-iot-seattle-dev
+
+labels:
+  environment: dev
+  city: Seattle
+
+parameters:
+  clusterName: seattle-dev-arc
+  brokerConfig:
+    frontendReplicas: 1
+    frontendWorkers: 1
+    backendRedundancyFactor: 2
+    backendWorkers: 1
+    backendPartitions: 1
+    memoryProfile: Low

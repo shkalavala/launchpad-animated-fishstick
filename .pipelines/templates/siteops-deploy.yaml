@@ -1,0 +1,166 @@
+# Stage template: Site Ops deployment
+# Equivalent to .github/workflows/_siteops-deploy.yaml
+
+parameters:
+  - name: serviceConnection
+    displayName: Azure service connection name (WIF)
+    type: string
+  - name: workspace
+    displayName: Workspace directory
+    type: string
+    default: workspaces/iot-operations
+  - name: manifest
+    displayName: Manifest path (relative to workspace)
+    type: string
+  - name: environment
+    displayName: ADO environment name (approval gates)
+    type: string
+    default: ''
+  - name: selector
+    displayName: Site selector
+    type: string
+    default: ''
+  - name: dryRun
+    displayName: Preview only
+    type: boolean
+    default: false
+  - name: siteopsSource
+    displayName: siteops install source (empty = local editable install)
+    type: string
+    default: ''
+  - name: stageName
+    displayName: Stage id (override when including this template more than once)
+    type: string
+    default: deploy
+
+stages:
+  - stage: ${{ parameters.stageName }}
+    variables:
+      PYTHONUNBUFFERED: '1'
+    jobs:
+      - deployment: siteops_deploy
+        displayName: Deploy
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  fetchDepth: 1
+                  persistCredentials: false
+
+                - template: setup-siteops.yaml
+                  parameters:
+                    siteopsSource: ${{ parameters.siteopsSource }}
+                    enableCache: false
+
+                - script: |
+                    # Prevent path traversal attacks
+                    if [[ "$WORKSPACE" == *".."* ]] || [[ "$MANIFEST" == *".."* ]]; then
+                      echo "##vso[task.logissue type=error]Path traversal not allowed"
+                      exit 1
+                    fi
+
+                    if [[ -n "$SELECTOR" && ! "$SELECTOR" =~ ^[a-zA-Z0-9_=,./:-]+$ ]]; then
+                      echo "##vso[task.logissue type=error]Invalid selector format"
+                      exit 1
+                    fi
+
+                    if [[ ! -d "$WORKSPACE" ]]; then
+                      echo "##vso[task.logissue type=error]Workspace directory not found: $WORKSPACE"
+                      exit 1
+                    fi
+
+                    echo "✓ Inputs validated"
+                  displayName: Validate inputs
+                  env:
+                    WORKSPACE: ${{ parameters.workspace }}
+                    MANIFEST: ${{ parameters.manifest }}
+                    SELECTOR: ${{ parameters.selector }}
+
+                - script: |
+                    # ADO `script:` does not set pipefail by default. Without it
+                    # a python or jq failure in this pipeline would silently
+                    # leave overrides not written or values not masked.
+                    set -o pipefail
+                    if [[ -z "$SITE_OVERRIDES" ]]; then
+                      echo "No site overrides configured, using committed sites"
+                      exit 0
+                    fi
+
+                    echo "$SITE_OVERRIDES" | python3 scripts/generate-site-overrides.py "$WORKSPACE"
+
+                    # Mask override values in ADO logs
+                    echo "$SITE_OVERRIDES" | jq -r '.. | strings' | while IFS= read -r val; do
+                      [[ -n "$val" ]] && echo "##vso[task.setvariable variable=masked;issecret=true]${val}"
+                    done
+                  displayName: Setup site overrides
+                  env:
+                    WORKSPACE: ${{ parameters.workspace }}
+                    SITE_OVERRIDES: $(SITE_OVERRIDES)
+
+                - script: |
+                    # set -o pipefail so `siteops validate ... | tee` returns
+                    # siteops's exit code, not tee's. Otherwise a validation
+                    # failure passes silently and Deploy runs against a manifest
+                    # that did not validate.
+                    set -o pipefail
+                    CMD_ARGS=(-w "$WORKSPACE" validate "$MANIFEST")
+                    [[ -n "$SELECTOR" ]] && CMD_ARGS+=(-l "$SELECTOR")
+                    CMD_ARGS+=(-v)
+
+                    SUMMARY_FILE="$(Build.ArtifactStagingDirectory)/deployment-plan.md"
+                    echo "### Deployment Plan" > "$SUMMARY_FILE"
+                    echo '```' >> "$SUMMARY_FILE"
+                    siteops "${CMD_ARGS[@]}" 2>&1 | tee -a "$SUMMARY_FILE"
+                    echo '```' >> "$SUMMARY_FILE"
+                    echo "##vso[task.uploadsummary]$SUMMARY_FILE"
+                  displayName: Validate and show target sites
+                  env:
+                    WORKSPACE: ${{ parameters.workspace }}
+                    MANIFEST: ${{ parameters.manifest }}
+                    SELECTOR: ${{ parameters.selector }}
+
+                - task: AzureCLI@2
+                  displayName: Deploy
+                  inputs:
+                    azureSubscription: ${{ parameters.serviceConnection }}
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      START_TIME=$(date +%s)
+
+                      CMD_ARGS=(-w "$WORKSPACE" deploy "$MANIFEST")
+
+                      if [[ "$DRY_RUN" == "True" ]]; then
+                        CMD_ARGS+=(--dry-run)
+                        echo "##vso[task.logissue type=warning]Running in DRY-RUN mode - no actual deployment"
+                      fi
+
+                      [[ -n "$SELECTOR" ]] && CMD_ARGS+=(-l "$SELECTOR")
+
+                      echo "Executing: siteops ${CMD_ARGS[*]}"
+                      if siteops "${CMD_ARGS[@]}" 2>&1; then
+                        DEPLOY_EXIT_CODE=0
+                      else
+                        DEPLOY_EXIT_CODE=$?
+                      fi
+
+                      END_TIME=$(date +%s)
+                      DURATION=$((END_TIME - START_TIME))
+
+                      RESULT_FILE="$(Build.ArtifactStagingDirectory)/deployment-result.md"
+                      echo "### Deployment Result" > "$RESULT_FILE"
+                      if [[ $DEPLOY_EXIT_CODE -eq 0 ]]; then
+                        echo "✅ **Success** in ${DURATION}s" >> "$RESULT_FILE"
+                      else
+                        echo "❌ **Failed** after ${DURATION}s" >> "$RESULT_FILE"
+                      fi
+                      echo "##vso[task.uploadsummary]$RESULT_FILE"
+
+                      exit $DEPLOY_EXIT_CODE
+                  env:
+                    WORKSPACE: ${{ parameters.workspace }}
+                    MANIFEST: ${{ parameters.manifest }}
+                    SELECTOR: ${{ parameters.selector }}
+                    DRY_RUN: ${{ parameters.dryRun }}
