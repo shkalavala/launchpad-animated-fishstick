@@ -8,7 +8,7 @@ name: stockholm-assembly-prod
 inherits: shared/sweden.yaml
 
 # subscription, location, country inherited from shared/sweden.yaml
-resourceGroup: rg-iot-stockholm-assembly-prod
+resourceGroup: rg-iot-stockholm-prod-eu
 
 labels:
   environment: prod
